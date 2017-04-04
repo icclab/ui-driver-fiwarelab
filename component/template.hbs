@@ -1,35 +1,179 @@
 <section class="horizontal-form">
+<form>
   <div class="container-fluid">
-    {{!-- This partial contains the quantity, name, and description fields --}}
-    {{partial "host/add-common"}}
-
+    {{#if isStep1}}
     <div class="over-hr r-mt20 r-mb20">
-      <span>My Skeleton Driver</span>
+      <span>ACCOUNT ACCESS</span>
     </div>
 
-    {{!-- An example input option --}}
-    <div class="row">
-      <div class="col-sm-12 col-md-2 form-label">
-        <label class="form-control-static">Size</label>
-      </div>
-      <div class="col-sm-12 col-md-4">
-        <div class="input-group">
-          {{input type="text"
-            class="form-control"
-            value=model.%%DRIVERNAME%%Config.size
-          }}
-          <span class="input-group-addon">MB</span>
+    <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Username*</label>
         </div>
+      </div>
+      <div class="col-md-5">
+        {{input type="text" name="username" value=model.%%DRIVERNAME%%Config.username classNames="form-control" placeholder="FIWARE Lab username"}}
+      </div>
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Password*</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        {{input type="password" name="password" value=model.%%DRIVERNAME%%Config.password classNames="form-control" placeholder="FIWARE Lab password"}}
+      </div>
+    </div>
+
+    <div class="over-hr r-mt20 r-mb20">
+      <span>REGION</span>
+    </div>
+
+    <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Region*</label>
+        </div>
+      </div>
+      <div class="col-md-11">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.region) value="target.value"}}>
+          {{#each fiwareRegions as |choice|}}
+            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.region choice.name}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+        <button {{action "authenticate"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
+    </div>
+    {{top-errors errors=errors}}
+
+    {{else if isStep2}}
+
+     <div class="over-hr r-mt20 r-mb20">
+      <span>Project ID</span>
+     </div>
+
+     <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Project ID*</label>
+        </div>
+      </div>
+      <div class="col-md-11">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.tenantId) value="target.value"}}>
+          {{#each tenants as |choice|}}
+            <option value={{choice.id}} selected={{eq model.%%DRIVERNAME%%Config.tenantId choice.id}}>{{choice.id}}</option>
+          {{/each}}
+        </select>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+        <button {{action "tenantCheck"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
+    </div>
+
+    {{else if isStep3}}
+    {{partial "host/add-common"}}
+    <div class="over-hr r-mt20 r-mb20">
+      <span>INSTANCE</span>
+    </div>
+
+    <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Image*</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <select class="form-control" onchange={{action "selectImage" value="target.value"}}>
+          {{#each fiwareImages as |choice|}}
+            <option value={{choice.slug}} selected={{eq model.%%DRIVERNAME%%Config.imageName choice.slug}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+      </div> 
+
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Flavor*</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.flavorName) value="target.value"}}>
+          {{#each fiwareFlavors as |choice|}}
+            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.flavorName choice.name}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+      </div>
+    </div>
+    
+    <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Network*</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.netName) value="target.value"}}>
+          {{#each fiwareNetworks as |choice|}}
+            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.netName choice.name}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+        <p class="text-info">Default: node-int-net-01.</p>
+      </div>
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">FIP Pool</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.floatingipPool) value="target.value"}}>
+          {{#each fiwarefippool as |choice|}}
+            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.floatingipPool choice.name}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+        <p class="text-info">Default: public-ext-net-01.</p>
+      </div>
+    </div>
+
+    <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Sec Groups</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+         <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.secGroups) value="target.value"}}>
+          {{#each fiwareSecGroups as |choice|}}
+            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.secGroups choice.name}}>{{choice.name}}</option>
+          {{/each}}
+        </select>
+
+        <p class="text-info">Make sure that the port 2376 is open.</p>
+      </div>
+
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">SSH user</label>
+        </div>
+      </div>
+      <div class="col-md-5">
+        {{input type="text" name="sshUser" value=model.%%DRIVERNAME%%Config.sshUser classNames="form-control" placeholder="root"}}
       </div>
     </div>
 
     {{!-- This partial contains the Labels and Advanced Options fields --}}
     {{partial "host/add-options"}}
+    {{!-- This component shows errors produced by validate() in the component --}}
+    {{top-errors errors=errors}}
+
+    {{!-- This component shows the Create and Cancel buttons --}}
+    <div class="footer-actions">
+      <button {{action "back"}} name="submit" class="btn bg-transparent">Back</button>
+      <button {{action "save"}} name="submit" class="btn bg-primary">Save</button>
+    </div>
+    {{/if}}
   </div>
-
-  {{!-- This component shows errors produced by validate() in the component --}}
-  {{top-errors errors=errors}}
-
-  {{!-- This component shows the Create and Cancel buttons --}}
-  {{save-cancel save="save" cancel="cancel"}}
+</form>
 </section>
