@@ -25,25 +25,6 @@
       </div>
     </div>
 
-    <div class="over-hr r-mt20 r-mb20">
-      <span>REGION</span>
-    </div>
-
-    <div class="row form-group">
-      <div class="col-md-1">
-        <div class="form-label">
-          <label class="form-control-static">Region*</label>
-        </div>
-      </div>
-      <div class="col-md-11">
-        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.region) value="target.value"}}>
-          {{#each fiwareRegions as |choice|}}
-            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.region choice.name}}>{{choice.name}}</option>
-          {{/each}}
-        </select>
-      </div>
-    </div>
-
     <div class="footer-actions">
         <button {{action "authenticate"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
     </div>
@@ -71,10 +52,35 @@
     </div>
 
     <div class="footer-actions">
-        <button {{action "tenantCheck"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
+        <button {{action "checkTenant"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
     </div>
 
     {{else if isStep3}}
+
+     <div class="over-hr r-mt20 r-mb20">
+      <span>Select Region</span>
+     </div>
+
+     <div class="row form-group">
+      <div class="col-md-1">
+        <div class="form-label">
+          <label class="form-control-static">Region*</label>
+        </div>
+      </div>
+      <div class="col-md-11">
+        <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.region) value="target.value"}}>
+          {{#each regions as |choice|}}
+            <option value={{choice}} selected={{eq model.%%DRIVERNAME%%Config.region choice}}>{{choice}}</option>
+          {{/each}}
+        </select>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+        <button {{action "regionSelected"}} name="submit" class="btn bg-primary">Next: Select instance configuration</button>
+    </div>
+
+    {{else if isStep4}}
     {{partial "host/add-common"}}
     <div class="over-hr r-mt20 r-mb20">
       <span>INSTANCE</span>
@@ -144,15 +150,18 @@
         </div>
       </div>
       <div class="col-md-5">
-         <select class="form-control" onchange={{action (mut model.%%DRIVERNAME%%Config.secGroups) value="target.value"}}>
-          {{#each fiwareSecGroups as |choice|}}
-            <option value={{choice.name}} selected={{eq model.%%DRIVERNAME%%Config.secGroups choice.name}}>{{choice.name}}</option>
-          {{/each}}
-        </select>
-
+      <div class="dropdown">
+        <button {{action "toggleVisible"}} name="submit" class="form-control button-dropdown text-left">{{model.%%DRIVERNAME%%Config.secGroups}}</button>
+        <div class={{toggleSec}}>
+          <ul>
+            {{#each fiwareSecGroups as |choice|}}
+              <li><input type="checkbox" name={{choice.name}} value={{choice.name}} onchange={{action (action "secGroupList" choice.name) value="target.checked"}}> {{choice.name}}</li>
+            {{/each}}
+          </ul>
+        </div>
+      </div>
         <p class="text-info">Make sure that the port 2376 is open.</p>
       </div>
-
       <div class="col-md-1">
         <div class="form-label">
           <label class="form-control-static">SSH user</label>

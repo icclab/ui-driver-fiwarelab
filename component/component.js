@@ -8,10 +8,14 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
     fiwareNetworks : [],
     fiwarefippool  : [],
     tenants        : [],
+    regions        : [],
+    secGroups      : [],
+    toggleSec      : "dropdown-content", 
     step           : 1,
     isStep1        : Ember.computed.equal('step', 1),
     isStep2        : Ember.computed.equal('step', 2),
     isStep3        : Ember.computed.equal('step', 3),
+    isStep4        : Ember.computed.equal('step', 4),
 
     // Write your component here, starting with setting 'model' to a machine with your config populated
     bootstrap: function() {
@@ -21,8 +25,9 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
         username        : '',
         password        : '',
         tenantId        : '',
-        region          : 'Zurich2',
+        region          : '',
         authUrl         : 'http://cloud.lab.fiware.org:4730/v2.0/',
+        authUrlv3       : 'http://cloud.lab.fiware.org:4730/v3/',
         imageName       : 'base_ubuntu_14.04',
         secGroups       : '',
         netName         : '',
@@ -63,7 +68,7 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
     },
 
     actions: {
-       auth_ok: function(obj){
+       authenticated: function(obj){
          let self = this;
          function SecGroups(obj){
            self.set('fiwareSecGroups', obj.security_groups);
@@ -96,7 +101,7 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
          JSTACK.Nova.getsecuritygrouplist(SecGroups, err, this.get('model.%%DRIVERNAME%%Config.region'));
          JSTACK.Neutron.params.baseurl = this.get('settings').get('api$host') + '/v2-beta/proxy/'
          JSTACK.Neutron.getnetworkslist(networks, err, this.get('model.%%DRIVERNAME%%Config.region'));
-         this.set('step', 3);
+         this.set('step', 4);
        },
        auth_err: function(err) {
          // still very basic error handling
@@ -122,8 +127,8 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
          function send_auth_err(err){
            self.send('auth_err', err);
          }
-         function send_auth_ok(obj){
-           self.send('auth_ok', obj);
+         function send_authenticated(obj){
+           self.send('authenticated', obj);
          }
          function getTenants(token){
            function validate_tenants(tenants){
@@ -132,36 +137,64 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
              if (tenants.length == 1) {
                tenant = tenants[0];
                self.set('model.%%DRIVERNAME%%Config.tenantId', tenant.id);
-               JSTACK.Keystone.authenticate(undefined, undefined, JSTACK.Keystone.params.token, tenant.id, send_auth_ok, send_auth_err);
-             } else if (tenants.length >= 2){
+               self.send('checkTenant');
+             } else {
                self.set('step', 2);
                self.set('model.%%DRIVERNAME%%Config.tenantId', tenants[0]['id']); 
                self.set('tenants', tenants);
                tenant = tenants[0];
-             } else {
-               error("No tenant");
-             }
+             } 
            }
            JSTACK.Keystone.gettenants(validate_tenants); 
          }
 
-         JSTACK.Keystone.init(this.get('element.baseURI') + 'v2-beta/proxy/' + this.get('model.%%DRIVERNAME%%Config.authUrl'));
+         JSTACK.Keystone.init(this.get('settings').get('api$host') + '/v2-beta/proxy/' + this.get('model.%%DRIVERNAME%%Config.authUrl'));
          JSTACK.Keystone.authenticate(this.get('model.%%DRIVERNAME%%Config.username'),
                                       this.get('model.%%DRIVERNAME%%Config.password'), 
-                                      null, 
+                                      undefined, 
                                       undefined, 
                                       getTenants,
                                       send_auth_err);
       },
-       tenantCheck: function(){
+       checkRegion: function(obj){
+         let endpoints = obj.access.serviceCatalog;
+         let compute_endpoint = endpoints.filterBy('type', 'compute');
+         let regions = [];
+         for (i=0; i < compute_endpoint[0].endpoints.length; i++){
+          if(!(regions.includes(compute_endpoint[0].endpoints[i]['region']))){
+            regions.push(compute_endpoint[0].endpoints[i]['region'])
+          }
+         };
+         if (regions.length == 1){
+          this.set('model.%%DRIVERNAME%%Config.region', regions[0]);
+          this.send('authenticated');
+         } else {
+          this.set('regions', regions);
+          this.set('model.%%DRIVERNAME%%Config.region', regions[0]);
+          this.set('step', 3);
+         }
+       },
+       regionSelected: function(){
+        this.send('authenticated');
+       },
+       checkTenant: function(){
          let self = this;
          function send_auth_err(err) {
            self.send('auth_err', err);
          }
-         function send_auth_ok(obj){
-           self.send('auth_ok', obj);
+         function send_authenticated(obj){
+           self.send('authenticated', obj);
          }
-         JSTACK.Keystone.authenticate(undefined, undefined, JSTACK.Keystone.params.token, this.get('model.%%DRIVERNAME%%Config.tenantId'), send_auth_ok, send_auth_err);
+         function send_check_region(obj){
+          self.send('checkRegion', obj);
+         }
+         /*Workaround to retrieve Region for user
+                   First, the user is authenticated using keystone v2 endpoint to retrieve tenant information
+                   then keystone v3 endpoint is used to retrieve regions associated with that tenant  */
+         JSTACK.Keystone.init(self.get('settings').get('api$host') + '/v2-beta/proxy/' + self.get('model.%%DRIVERNAME%%Config.authUrlv3'));
+         JSTACK.Keystone.authenticate(self.get('model.%%DRIVERNAME%%Config.username'),
+                                      self.get('model.%%DRIVERNAME%%Config.password'),
+                                      undefined, self.get('model.%%DRIVERNAME%%Config.tenantId'), send_check_region, send_auth_err);
       },
        instanceConfig: function(){
          this.set('errors', null);
@@ -183,6 +216,21 @@ define('ui/components/machine/driver-%%DRIVERNAME%%/component', ['exports', 'emb
         image = fiwareImages.filter(item => item['slug'] === slug);
         this.set('model.%%DRIVERNAME%%Config.sshUser', image[0]['ssh_user']); 
       },
+       toggleVisible: function(){
+        if (this.get('toggleSec') == 'dropdown-content'){
+          this.set('toggleSec', 'dropdown-content-visible');
+        } else {
+          this.set('toggleSec', 'dropdown-content');
+        }
+       },
+       secGroupList: function(item, isChecked){
+        if(isChecked){
+          this.get('secGroups').addObject(item);
+        } else {
+          this.get('secGroups').removeObject(item);
+        }
+          this.set('model.%%DRIVERNAME%%Config.secGroups', this.get('secGroups').join());
+       },
     },
   });
 });

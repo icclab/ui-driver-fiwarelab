@@ -99,10 +99,18 @@ JSTACK.Keystone = (function (JS, undefined) {
                 }
             } else {
                 credentials = {
-                    "auth" : {
-                        "passwordCredentials" : {
-                            "username" : username,
-                            "password" : password
+                    "auth": {
+                        "identity": {
+                            "methods": [
+                                "password"
+                            ],
+                            "password": {
+                                "user": {
+                                    "name": username,
+                                    "domain": { "id": "default" },
+                                    "password": password
+                                }
+                            }
                         }
                     }
                 };
@@ -110,12 +118,12 @@ JSTACK.Keystone = (function (JS, undefined) {
 
             // User also can provide a `tenant`.
             if (tenant !== undefined) {
-                credentials.auth.scope = {project: {id: tenant}};
+                credentials.auth.scope = { project: {id: tenant}};
             }
 
         } else {
 
-            if (token !== null) {
+            if (token !== undefined) {
                 credentials = {
                     "auth" : {
                         "token" : {
@@ -123,7 +131,7 @@ JSTACK.Keystone = (function (JS, undefined) {
                         }
                     }
                 };
-            } else {
+            } else { 
                 credentials = {
                     "auth" : {
                         "passwordCredentials" : {
@@ -208,7 +216,6 @@ JSTACK.Keystone = (function (JS, undefined) {
         //       }
         if (params.version === 3) {
             JS.Comm.post(params.url + "auth/tokens", credentials, undefined, function (result, headers, token) {
-
                 var resp = {
                     access:{
                         token: {
@@ -374,7 +381,7 @@ JSTACK.Keystone = (function (JS, undefined) {
                 url = params.adminUrl
             }
 
-            if (params.version === 3) {
+            if (params.version === 3 && params.access_token) {
                 JS.Comm.get(url + "authorized_organizations/" + params.access_token, undefined, function (result) {
                     onOK({tenants: result.organizations});
                 }, onError);

@@ -338,10 +338,18 @@ JSTACK.Keystone = (function (JS, undefined) {
                 }
             } else {
                 credentials = {
-                    "auth" : {
-                        "passwordCredentials" : {
-                            "username" : username,
-                            "password" : password
+                    "auth": {
+                        "identity": {
+                            "methods": [
+                                "password"
+                            ],
+                            "password": {
+                                "user": {
+                                    "name": username,
+                                    "domain": { "id": "default" },
+                                    "password": password
+                                }
+                            }
                         }
                     }
                 };
@@ -349,12 +357,12 @@ JSTACK.Keystone = (function (JS, undefined) {
 
             // User also can provide a `tenant`.
             if (tenant !== undefined) {
-                credentials.auth.scope = {project: {id: tenant}};
+                credentials.auth.scope = { project: {id: tenant}};
             }
 
         } else {
 
-            if (token !== null) {
+            if (token !== undefined) {
                 credentials = {
                     "auth" : {
                         "token" : {
@@ -362,7 +370,7 @@ JSTACK.Keystone = (function (JS, undefined) {
                         }
                     }
                 };
-            } else {
+            } else { 
                 credentials = {
                     "auth" : {
                         "passwordCredentials" : {
@@ -447,7 +455,6 @@ JSTACK.Keystone = (function (JS, undefined) {
         //       }
         if (params.version === 3) {
             JS.Comm.post(params.url + "auth/tokens", credentials, undefined, function (result, headers, token) {
-
                 var resp = {
                     access:{
                         token: {
@@ -613,7 +620,7 @@ JSTACK.Keystone = (function (JS, undefined) {
                 url = params.adminUrl
             }
 
-            if (params.version === 3) {
+            if (params.version === 3 && params.access_token) {
                 JS.Comm.get(url + "authorized_organizations/" + params.access_token, undefined, function (result) {
                     onOK({tenants: result.organizations});
                 }, onError);
@@ -3196,10 +3203,14 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
     fiwareNetworks : [],
     fiwarefippool  : [],
     tenants        : [],
+    regions        : [],
+    secGroups      : [],
+    toggleSec      : "dropdown-content", 
     step           : 1,
     isStep1        : Ember.computed.equal('step', 1),
     isStep2        : Ember.computed.equal('step', 2),
     isStep3        : Ember.computed.equal('step', 3),
+    isStep4        : Ember.computed.equal('step', 4),
 
     // Write your component here, starting with setting 'model' to a machine with your config populated
     bootstrap: function() {
@@ -3209,8 +3220,9 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
         username        : '',
         password        : '',
         tenantId        : '',
-        region          : 'Zurich2',
+        region          : '',
         authUrl         : 'http://cloud.lab.fiware.org:4730/v2.0/',
+        authUrlv3       : 'http://cloud.lab.fiware.org:4730/v3/',
         imageName       : 'base_ubuntu_14.04',
         secGroups       : '',
         netName         : '',
@@ -3251,12 +3263,8 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
     },
 
     actions: {
-       auth_ok: function(obj){
+       authenticated: function(obj){
          let self = this;
-         console.log(obj);
-         function print(obj){
-           console.log(obj);
-         }
          function SecGroups(obj){
            self.set('fiwareSecGroups', obj.security_groups);
          }
@@ -3281,14 +3289,14 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
            self.set('errors', [err]);
            return false;
          }
-         console.log(JSTACK.Keystone.getservicelist());
+
          JSTACK.Nova.params.baseurl = this.get('settings').get('api$host') + '/v2-beta/proxy/';
          JSTACK.Nova.getflavorlist(null, Flavors, err, this.get('model.fiwarelabConfig.region'));
          JSTACK.Nova.getfloatingIPpools(fip, err, this.get('model.fiwarelabConfig.region'));
          JSTACK.Nova.getsecuritygrouplist(SecGroups, err, this.get('model.fiwarelabConfig.region'));
          JSTACK.Neutron.params.baseurl = this.get('settings').get('api$host') + '/v2-beta/proxy/'
          JSTACK.Neutron.getnetworkslist(networks, err, this.get('model.fiwarelabConfig.region'));
-         this.set('step', 3);
+         this.set('step', 4);
        },
        auth_err: function(err) {
          // still very basic error handling
@@ -3314,47 +3322,74 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
          function send_auth_err(err){
            self.send('auth_err', err);
          }
-         function send_auth_ok(obj){
-           self.send('auth_ok', obj);
+         function send_authenticated(obj){
+           self.send('authenticated', obj);
          }
          function getTenants(token){
-           console.log(token);
            function validate_tenants(tenants){
              tenants = tenants.tenants
              tenants = tenants.filter(item => item['is_cloud_project']);
              if (tenants.length == 1) {
                tenant = tenants[0];
                self.set('model.fiwarelabConfig.tenantId', tenant.id);
-               JSTACK.Keystone.authenticate(undefined, undefined, JSTACK.Keystone.params.token, tenant.id, send_auth_ok, send_auth_err);
-             } else if (tenants.length >= 2){
+               self.send('checkTenant');
+             } else {
                self.set('step', 2);
                self.set('model.fiwarelabConfig.tenantId', tenants[0]['id']); 
                self.set('tenants', tenants);
                tenant = tenants[0];
-             } else {
-               error("No tenant");
-             }
+             } 
            }
            JSTACK.Keystone.gettenants(validate_tenants); 
          }
 
-         JSTACK.Keystone.init(this.get('element.baseURI') + 'v2-beta/proxy/' + this.get('model.fiwarelabConfig.authUrl'));
+         JSTACK.Keystone.init(this.get('settings').get('api$host') + '/v2-beta/proxy/' + this.get('model.fiwarelabConfig.authUrl'));
          JSTACK.Keystone.authenticate(this.get('model.fiwarelabConfig.username'),
                                       this.get('model.fiwarelabConfig.password'), 
-                                      null, 
+                                      undefined, 
                                       undefined, 
                                       getTenants,
                                       send_auth_err);
       },
-       tenantCheck: function(){
+       checkRegion: function(obj){
+         let endpoints = obj.access.serviceCatalog;
+         let compute_endpoint = endpoints.filterBy('type', 'compute');
+         let regions = [];
+         for (i=0; i < compute_endpoint[0].endpoints.length; i++){
+          if(!(regions.includes(compute_endpoint[0].endpoints[i]['region']))){
+            regions.push(compute_endpoint[0].endpoints[i]['region'])
+          }
+         };
+         if (regions.length == 1){
+          this.set('model.fiwarelabConfig.region', regions[0]);
+          this.send('authenticated');
+         } else {
+          this.set('regions', regions);
+          this.set('model.fiwarelabConfig.region', regions[0]);
+          this.set('step', 3);
+         }
+       },
+       regionSelected: function(){
+        this.send('authenticated');
+       },
+       checkTenant: function(){
          let self = this;
          function send_auth_err(err) {
            self.send('auth_err', err);
          }
-         function send_auth_ok(obj){
-           self.send('auth_ok', obj);
+         function send_authenticated(obj){
+           self.send('authenticated', obj);
          }
-         JSTACK.Keystone.authenticate(undefined, undefined, JSTACK.Keystone.params.token, this.get('model.fiwarelabConfig.tenantId'), send_auth_ok, send_auth_err);
+         function send_check_region(obj){
+          self.send('checkRegion', obj);
+         }
+         /*Workaround to retrieve Region for user
+                   First, the user is authenticated using keystone v2 endpoint to retrieve tenant information
+                   then keystone v3 endpoint is used to retrieve regions associated with that tenant  */
+         JSTACK.Keystone.init(self.get('settings').get('api$host') + '/v2-beta/proxy/' + self.get('model.fiwarelabConfig.authUrlv3'));
+         JSTACK.Keystone.authenticate(self.get('model.fiwarelabConfig.username'),
+                                      self.get('model.fiwarelabConfig.password'),
+                                      undefined, self.get('model.fiwarelabConfig.tenantId'), send_check_region, send_auth_err);
       },
        instanceConfig: function(){
          this.set('errors', null);
@@ -3376,10 +3411,42 @@ define('ui/components/machine/driver-fiwarelab/component', ['exports', 'ember', 
         image = fiwareImages.filter(item => item['slug'] === slug);
         this.set('model.fiwarelabConfig.sshUser', image[0]['ssh_user']); 
       },
+       toggleVisible: function(){
+        if (this.get('toggleSec') == 'dropdown-content'){
+          this.set('toggleSec', 'dropdown-content-visible');
+        } else {
+          this.set('toggleSec', 'dropdown-content');
+        }
+       },
+       secGroupList: function(item, isChecked){
+        if(isChecked){
+          this.get('secGroups').addObject(item);
+        } else {
+          this.get('secGroups').removeObject(item);
+        }
+          this.set('model.fiwarelabConfig.secGroups', this.get('secGroups').join());
+       },
     },
   });
 });
 ;
+// Copyright (c) 2017. Zuercher Hochschule fuer Angewandte Wissenschaften
+// All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License. You may obtain
+// a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations
+// under the License.
+//
+// AUTHOR: Bruno Grazioli
+
 let fiwareImages = [
   {
     "slug"    : "base_ubuntu_14.04",
@@ -3467,55 +3534,6 @@ define("ui/components/machine/driver-fiwarelab/template",["exports","ember","ui/
 
 exports["default"] = Ember.HTMLBars.template((function() {
   var child0 = (function() {
-    var child0 = (function() {
-      return {
-        meta: {
-          "revision": "Ember@2.9.1",
-          "loc": {
-            "source": null,
-            "start": {
-              "line": 40,
-              "column": 10
-            },
-            "end": {
-              "line": 42,
-              "column": 10
-            }
-          }
-        },
-        isEmpty: false,
-        arity: 1,
-        cachedFragment: null,
-        hasRendered: false,
-        buildFragment: function buildFragment(dom) {
-          var el0 = dom.createDocumentFragment();
-          var el1 = dom.createTextNode("            ");
-          dom.appendChild(el0, el1);
-          var el1 = dom.createElement("option");
-          var el2 = dom.createComment("");
-          dom.appendChild(el1, el2);
-          dom.appendChild(el0, el1);
-          var el1 = dom.createTextNode("\n");
-          dom.appendChild(el0, el1);
-          return el0;
-        },
-        buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-          var element19 = dom.childAt(fragment, [1]);
-          var morphs = new Array(3);
-          morphs[0] = dom.createAttrMorph(element19, 'value');
-          morphs[1] = dom.createAttrMorph(element19, 'selected');
-          morphs[2] = dom.createMorphAt(element19,0,0);
-          return morphs;
-        },
-        statements: [
-          ["attribute","value",["get","choice.name",["loc",[null,[41,28],[41,39]]],0,0,0,0],0,0,0,0],
-          ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.region",["loc",[null,[41,56],[41,84]]],0,0,0,0],["get","choice.name",["loc",[null,[41,85],[41,96]]],0,0,0,0]],[],["loc",[null,[null,null],[41,98]]],0,0],0,0,0,0],
-          ["content","choice.name",["loc",[null,[41,99],[41,114]]],0,0,0,0]
-        ],
-        locals: ["choice"],
-        templates: []
-      };
-    }());
     return {
       meta: {
         "revision": "Ember@2.9.1",
@@ -3526,7 +3544,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
             "column": 4
           },
           "end": {
-            "line": 52,
+            "line": 33,
             "column": 4
           }
         }
@@ -3624,65 +3642,6 @@ exports["default"] = Ember.HTMLBars.template((function() {
         var el1 = dom.createTextNode("\n\n    ");
         dom.appendChild(el0, el1);
         var el1 = dom.createElement("div");
-        dom.setAttribute(el1,"class","over-hr r-mt20 r-mb20");
-        var el2 = dom.createTextNode("\n      ");
-        dom.appendChild(el1, el2);
-        var el2 = dom.createElement("span");
-        var el3 = dom.createTextNode("REGION");
-        dom.appendChild(el2, el3);
-        dom.appendChild(el1, el2);
-        var el2 = dom.createTextNode("\n    ");
-        dom.appendChild(el1, el2);
-        dom.appendChild(el0, el1);
-        var el1 = dom.createTextNode("\n\n    ");
-        dom.appendChild(el0, el1);
-        var el1 = dom.createElement("div");
-        dom.setAttribute(el1,"class","row form-group");
-        var el2 = dom.createTextNode("\n      ");
-        dom.appendChild(el1, el2);
-        var el2 = dom.createElement("div");
-        dom.setAttribute(el2,"class","col-md-1");
-        var el3 = dom.createTextNode("\n        ");
-        dom.appendChild(el2, el3);
-        var el3 = dom.createElement("div");
-        dom.setAttribute(el3,"class","form-label");
-        var el4 = dom.createTextNode("\n          ");
-        dom.appendChild(el3, el4);
-        var el4 = dom.createElement("label");
-        dom.setAttribute(el4,"class","form-control-static");
-        var el5 = dom.createTextNode("Region*");
-        dom.appendChild(el4, el5);
-        dom.appendChild(el3, el4);
-        var el4 = dom.createTextNode("\n        ");
-        dom.appendChild(el3, el4);
-        dom.appendChild(el2, el3);
-        var el3 = dom.createTextNode("\n      ");
-        dom.appendChild(el2, el3);
-        dom.appendChild(el1, el2);
-        var el2 = dom.createTextNode("\n      ");
-        dom.appendChild(el1, el2);
-        var el2 = dom.createElement("div");
-        dom.setAttribute(el2,"class","col-md-11");
-        var el3 = dom.createTextNode("\n        ");
-        dom.appendChild(el2, el3);
-        var el3 = dom.createElement("select");
-        dom.setAttribute(el3,"class","form-control");
-        var el4 = dom.createTextNode("\n");
-        dom.appendChild(el3, el4);
-        var el4 = dom.createComment("");
-        dom.appendChild(el3, el4);
-        var el4 = dom.createTextNode("        ");
-        dom.appendChild(el3, el4);
-        dom.appendChild(el2, el3);
-        var el3 = dom.createTextNode("\n      ");
-        dom.appendChild(el2, el3);
-        dom.appendChild(el1, el2);
-        var el2 = dom.createTextNode("\n    ");
-        dom.appendChild(el1, el2);
-        dom.appendChild(el0, el1);
-        var el1 = dom.createTextNode("\n\n    ");
-        dom.appendChild(el0, el1);
-        var el1 = dom.createElement("div");
         dom.setAttribute(el1,"class","footer-actions");
         var el2 = dom.createTextNode("\n        ");
         dom.appendChild(el1, el2);
@@ -3704,28 +3663,23 @@ exports["default"] = Ember.HTMLBars.template((function() {
         return el0;
       },
       buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-        var element20 = dom.childAt(fragment, [3]);
-        var element21 = dom.childAt(fragment, [7, 3, 1]);
-        var element22 = dom.childAt(fragment, [9, 1]);
-        var morphs = new Array(6);
-        morphs[0] = dom.createMorphAt(dom.childAt(element20, [3]),1,1);
-        morphs[1] = dom.createMorphAt(dom.childAt(element20, [7]),1,1);
-        morphs[2] = dom.createAttrMorph(element21, 'onchange');
-        morphs[3] = dom.createMorphAt(element21,1,1);
-        morphs[4] = dom.createElementMorph(element22);
-        morphs[5] = dom.createMorphAt(fragment,11,11,contextualElement);
+        var element25 = dom.childAt(fragment, [3]);
+        var element26 = dom.childAt(fragment, [5, 1]);
+        var morphs = new Array(4);
+        morphs[0] = dom.createMorphAt(dom.childAt(element25, [3]),1,1);
+        morphs[1] = dom.createMorphAt(dom.childAt(element25, [7]),1,1);
+        morphs[2] = dom.createElementMorph(element26);
+        morphs[3] = dom.createMorphAt(fragment,7,7,contextualElement);
         return morphs;
       },
       statements: [
         ["inline","input",[],["type","text","name","username","value",["subexpr","@mut",[["get","model.fiwarelabConfig.username",["loc",[null,[16,50],[16,80]]],0,0,0,0]],[],[],0,0],"classNames","form-control","placeholder","FIWARE Lab username"],["loc",[null,[16,8],[16,142]]],0,0],
         ["inline","input",[],["type","password","name","password","value",["subexpr","@mut",[["get","model.fiwarelabConfig.password",["loc",[null,[24,54],[24,84]]],0,0,0,0]],[],[],0,0],"classNames","form-control","placeholder","FIWARE Lab password"],["loc",[null,[24,8],[24,146]]],0,0],
-        ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.region",["loc",[null,[39,60],[39,88]]],0,0,0,0]],[],["loc",[null,[39,55],[39,89]]],0,0]],["value","target.value"],["loc",[null,[null,null],[39,112]]],0,0],0,0,0,0],
-        ["block","each",[["get","fiwareRegions",["loc",[null,[40,18],[40,31]]],0,0,0,0]],[],0,null,["loc",[null,[40,10],[42,19]]]],
-        ["element","action",["authenticate"],[],["loc",[null,[48,16],[48,41]]],0,0],
-        ["inline","top-errors",[],["errors",["subexpr","@mut",[["get","errors",["loc",[null,[50,24],[50,30]]],0,0,0,0]],[],[],0,0]],["loc",[null,[50,4],[50,32]]],0,0]
+        ["element","action",["authenticate"],[],["loc",[null,[29,16],[29,41]]],0,0],
+        ["inline","top-errors",[],["errors",["subexpr","@mut",[["get","errors",["loc",[null,[31,24],[31,30]]],0,0,0,0]],[],[],0,0]],["loc",[null,[31,4],[31,32]]],0,0]
       ],
       locals: [],
-      templates: [child0]
+      templates: []
     };
   }());
   var child1 = (function() {
@@ -3737,11 +3691,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
             "loc": {
               "source": null,
               "start": {
-                "line": 66,
+                "line": 47,
                 "column": 10
               },
               "end": {
-                "line": 68,
+                "line": 49,
                 "column": 10
               }
             }
@@ -3763,17 +3717,17 @@ exports["default"] = Ember.HTMLBars.template((function() {
             return el0;
           },
           buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-            var element16 = dom.childAt(fragment, [1]);
+            var element22 = dom.childAt(fragment, [1]);
             var morphs = new Array(3);
-            morphs[0] = dom.createAttrMorph(element16, 'value');
-            morphs[1] = dom.createAttrMorph(element16, 'selected');
-            morphs[2] = dom.createMorphAt(element16,0,0);
+            morphs[0] = dom.createAttrMorph(element22, 'value');
+            morphs[1] = dom.createAttrMorph(element22, 'selected');
+            morphs[2] = dom.createMorphAt(element22,0,0);
             return morphs;
           },
           statements: [
-            ["attribute","value",["get","choice.id",["loc",[null,[67,28],[67,37]]],0,0,0,0],0,0,0,0],
-            ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.tenantId",["loc",[null,[67,54],[67,84]]],0,0,0,0],["get","choice.id",["loc",[null,[67,85],[67,94]]],0,0,0,0]],[],["loc",[null,[null,null],[67,96]]],0,0],0,0,0,0],
-            ["content","choice.id",["loc",[null,[67,97],[67,110]]],0,0,0,0]
+            ["attribute","value",["get","choice.id",["loc",[null,[48,28],[48,37]]],0,0,0,0],0,0,0,0],
+            ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.tenantId",["loc",[null,[48,54],[48,84]]],0,0,0,0],["get","choice.id",["loc",[null,[48,85],[48,94]]],0,0,0,0]],[],["loc",[null,[null,null],[48,96]]],0,0],0,0,0,0],
+            ["content","choice.id",["loc",[null,[48,97],[48,110]]],0,0,0,0]
           ],
           locals: ["choice"],
           templates: []
@@ -3785,11 +3739,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
           "loc": {
             "source": null,
             "start": {
-              "line": 52,
+              "line": 33,
               "column": 4
             },
             "end": {
-              "line": 77,
+              "line": 58,
               "column": 4
             }
           }
@@ -3879,18 +3833,18 @@ exports["default"] = Ember.HTMLBars.template((function() {
           return el0;
         },
         buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-          var element17 = dom.childAt(fragment, [3, 3, 1]);
-          var element18 = dom.childAt(fragment, [5, 1]);
+          var element23 = dom.childAt(fragment, [3, 3, 1]);
+          var element24 = dom.childAt(fragment, [5, 1]);
           var morphs = new Array(3);
-          morphs[0] = dom.createAttrMorph(element17, 'onchange');
-          morphs[1] = dom.createMorphAt(element17,1,1);
-          morphs[2] = dom.createElementMorph(element18);
+          morphs[0] = dom.createAttrMorph(element23, 'onchange');
+          morphs[1] = dom.createMorphAt(element23,1,1);
+          morphs[2] = dom.createElementMorph(element24);
           return morphs;
         },
         statements: [
-          ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.tenantId",["loc",[null,[65,60],[65,90]]],0,0,0,0]],[],["loc",[null,[65,55],[65,91]]],0,0]],["value","target.value"],["loc",[null,[null,null],[65,114]]],0,0],0,0,0,0],
-          ["block","each",[["get","tenants",["loc",[null,[66,18],[66,25]]],0,0,0,0]],[],0,null,["loc",[null,[66,10],[68,19]]]],
-          ["element","action",["tenantCheck"],[],["loc",[null,[74,16],[74,40]]],0,0]
+          ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.tenantId",["loc",[null,[46,60],[46,90]]],0,0,0,0]],[],["loc",[null,[46,55],[46,91]]],0,0]],["value","target.value"],["loc",[null,[null,null],[46,114]]],0,0],0,0,0,0],
+          ["block","each",[["get","tenants",["loc",[null,[47,18],[47,25]]],0,0,0,0]],[],0,null,["loc",[null,[47,10],[49,19]]]],
+          ["element","action",["checkTenant"],[],["loc",[null,[55,16],[55,40]]],0,0]
         ],
         locals: [],
         templates: [child0]
@@ -3905,11 +3859,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
               "loc": {
                 "source": null,
                 "start": {
-                  "line": 91,
+                  "line": 72,
                   "column": 10
                 },
                 "end": {
-                  "line": 93,
+                  "line": 74,
                   "column": 10
                 }
               }
@@ -3931,213 +3885,17 @@ exports["default"] = Ember.HTMLBars.template((function() {
               return el0;
             },
             buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-              var element4 = dom.childAt(fragment, [1]);
+              var element19 = dom.childAt(fragment, [1]);
               var morphs = new Array(3);
-              morphs[0] = dom.createAttrMorph(element4, 'value');
-              morphs[1] = dom.createAttrMorph(element4, 'selected');
-              morphs[2] = dom.createMorphAt(element4,0,0);
+              morphs[0] = dom.createAttrMorph(element19, 'value');
+              morphs[1] = dom.createAttrMorph(element19, 'selected');
+              morphs[2] = dom.createMorphAt(element19,0,0);
               return morphs;
             },
             statements: [
-              ["attribute","value",["get","choice.slug",["loc",[null,[92,28],[92,39]]],0,0,0,0],0,0,0,0],
-              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.imageName",["loc",[null,[92,56],[92,87]]],0,0,0,0],["get","choice.slug",["loc",[null,[92,88],[92,99]]],0,0,0,0]],[],["loc",[null,[null,null],[92,101]]],0,0],0,0,0,0],
-              ["content","choice.name",["loc",[null,[92,102],[92,117]]],0,0,0,0]
-            ],
-            locals: ["choice"],
-            templates: []
-          };
-        }());
-        var child1 = (function() {
-          return {
-            meta: {
-              "revision": "Ember@2.9.1",
-              "loc": {
-                "source": null,
-                "start": {
-                  "line": 104,
-                  "column": 10
-                },
-                "end": {
-                  "line": 106,
-                  "column": 10
-                }
-              }
-            },
-            isEmpty: false,
-            arity: 1,
-            cachedFragment: null,
-            hasRendered: false,
-            buildFragment: function buildFragment(dom) {
-              var el0 = dom.createDocumentFragment();
-              var el1 = dom.createTextNode("            ");
-              dom.appendChild(el0, el1);
-              var el1 = dom.createElement("option");
-              var el2 = dom.createComment("");
-              dom.appendChild(el1, el2);
-              dom.appendChild(el0, el1);
-              var el1 = dom.createTextNode("\n");
-              dom.appendChild(el0, el1);
-              return el0;
-            },
-            buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-              var element3 = dom.childAt(fragment, [1]);
-              var morphs = new Array(3);
-              morphs[0] = dom.createAttrMorph(element3, 'value');
-              morphs[1] = dom.createAttrMorph(element3, 'selected');
-              morphs[2] = dom.createMorphAt(element3,0,0);
-              return morphs;
-            },
-            statements: [
-              ["attribute","value",["get","choice.name",["loc",[null,[105,28],[105,39]]],0,0,0,0],0,0,0,0],
-              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.flavorName",["loc",[null,[105,56],[105,88]]],0,0,0,0],["get","choice.name",["loc",[null,[105,89],[105,100]]],0,0,0,0]],[],["loc",[null,[null,null],[105,102]]],0,0],0,0,0,0],
-              ["content","choice.name",["loc",[null,[105,103],[105,118]]],0,0,0,0]
-            ],
-            locals: ["choice"],
-            templates: []
-          };
-        }());
-        var child2 = (function() {
-          return {
-            meta: {
-              "revision": "Ember@2.9.1",
-              "loc": {
-                "source": null,
-                "start": {
-                  "line": 119,
-                  "column": 10
-                },
-                "end": {
-                  "line": 121,
-                  "column": 10
-                }
-              }
-            },
-            isEmpty: false,
-            arity: 1,
-            cachedFragment: null,
-            hasRendered: false,
-            buildFragment: function buildFragment(dom) {
-              var el0 = dom.createDocumentFragment();
-              var el1 = dom.createTextNode("            ");
-              dom.appendChild(el0, el1);
-              var el1 = dom.createElement("option");
-              var el2 = dom.createComment("");
-              dom.appendChild(el1, el2);
-              dom.appendChild(el0, el1);
-              var el1 = dom.createTextNode("\n");
-              dom.appendChild(el0, el1);
-              return el0;
-            },
-            buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-              var element2 = dom.childAt(fragment, [1]);
-              var morphs = new Array(3);
-              morphs[0] = dom.createAttrMorph(element2, 'value');
-              morphs[1] = dom.createAttrMorph(element2, 'selected');
-              morphs[2] = dom.createMorphAt(element2,0,0);
-              return morphs;
-            },
-            statements: [
-              ["attribute","value",["get","choice.name",["loc",[null,[120,28],[120,39]]],0,0,0,0],0,0,0,0],
-              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.netName",["loc",[null,[120,56],[120,85]]],0,0,0,0],["get","choice.name",["loc",[null,[120,86],[120,97]]],0,0,0,0]],[],["loc",[null,[null,null],[120,99]]],0,0],0,0,0,0],
-              ["content","choice.name",["loc",[null,[120,100],[120,115]]],0,0,0,0]
-            ],
-            locals: ["choice"],
-            templates: []
-          };
-        }());
-        var child3 = (function() {
-          return {
-            meta: {
-              "revision": "Ember@2.9.1",
-              "loc": {
-                "source": null,
-                "start": {
-                  "line": 132,
-                  "column": 10
-                },
-                "end": {
-                  "line": 134,
-                  "column": 10
-                }
-              }
-            },
-            isEmpty: false,
-            arity: 1,
-            cachedFragment: null,
-            hasRendered: false,
-            buildFragment: function buildFragment(dom) {
-              var el0 = dom.createDocumentFragment();
-              var el1 = dom.createTextNode("            ");
-              dom.appendChild(el0, el1);
-              var el1 = dom.createElement("option");
-              var el2 = dom.createComment("");
-              dom.appendChild(el1, el2);
-              dom.appendChild(el0, el1);
-              var el1 = dom.createTextNode("\n");
-              dom.appendChild(el0, el1);
-              return el0;
-            },
-            buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-              var element1 = dom.childAt(fragment, [1]);
-              var morphs = new Array(3);
-              morphs[0] = dom.createAttrMorph(element1, 'value');
-              morphs[1] = dom.createAttrMorph(element1, 'selected');
-              morphs[2] = dom.createMorphAt(element1,0,0);
-              return morphs;
-            },
-            statements: [
-              ["attribute","value",["get","choice.name",["loc",[null,[133,28],[133,39]]],0,0,0,0],0,0,0,0],
-              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.floatingipPool",["loc",[null,[133,56],[133,92]]],0,0,0,0],["get","choice.name",["loc",[null,[133,93],[133,104]]],0,0,0,0]],[],["loc",[null,[null,null],[133,106]]],0,0],0,0,0,0],
-              ["content","choice.name",["loc",[null,[133,107],[133,122]]],0,0,0,0]
-            ],
-            locals: ["choice"],
-            templates: []
-          };
-        }());
-        var child4 = (function() {
-          return {
-            meta: {
-              "revision": "Ember@2.9.1",
-              "loc": {
-                "source": null,
-                "start": {
-                  "line": 148,
-                  "column": 10
-                },
-                "end": {
-                  "line": 150,
-                  "column": 10
-                }
-              }
-            },
-            isEmpty: false,
-            arity: 1,
-            cachedFragment: null,
-            hasRendered: false,
-            buildFragment: function buildFragment(dom) {
-              var el0 = dom.createDocumentFragment();
-              var el1 = dom.createTextNode("            ");
-              dom.appendChild(el0, el1);
-              var el1 = dom.createElement("option");
-              var el2 = dom.createComment("");
-              dom.appendChild(el1, el2);
-              dom.appendChild(el0, el1);
-              var el1 = dom.createTextNode("\n");
-              dom.appendChild(el0, el1);
-              return el0;
-            },
-            buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-              var element0 = dom.childAt(fragment, [1]);
-              var morphs = new Array(3);
-              morphs[0] = dom.createAttrMorph(element0, 'value');
-              morphs[1] = dom.createAttrMorph(element0, 'selected');
-              morphs[2] = dom.createMorphAt(element0,0,0);
-              return morphs;
-            },
-            statements: [
-              ["attribute","value",["get","choice.name",["loc",[null,[149,28],[149,39]]],0,0,0,0],0,0,0,0],
-              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.secGroups",["loc",[null,[149,56],[149,87]]],0,0,0,0],["get","choice.name",["loc",[null,[149,88],[149,99]]],0,0,0,0]],[],["loc",[null,[null,null],[149,101]]],0,0],0,0,0,0],
-              ["content","choice.name",["loc",[null,[149,102],[149,117]]],0,0,0,0]
+              ["attribute","value",["get","choice",["loc",[null,[73,28],[73,34]]],0,0,0,0],0,0,0,0],
+              ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.region",["loc",[null,[73,51],[73,79]]],0,0,0,0],["get","choice",["loc",[null,[73,80],[73,86]]],0,0,0,0]],[],["loc",[null,[null,null],[73,88]]],0,0],0,0,0,0],
+              ["content","choice",["loc",[null,[73,89],[73,99]]],0,0,0,0]
             ],
             locals: ["choice"],
             templates: []
@@ -4149,11 +3907,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
             "loc": {
               "source": null,
               "start": {
-                "line": 77,
+                "line": 58,
                 "column": 4
               },
               "end": {
-                "line": 176,
+                "line": 83,
                 "column": 4
               }
             }
@@ -4164,109 +3922,20 @@ exports["default"] = Ember.HTMLBars.template((function() {
           hasRendered: false,
           buildFragment: function buildFragment(dom) {
             var el0 = dom.createDocumentFragment();
-            var el1 = dom.createTextNode("    ");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createComment("");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n    ");
+            var el1 = dom.createTextNode("\n     ");
             dom.appendChild(el0, el1);
             var el1 = dom.createElement("div");
             dom.setAttribute(el1,"class","over-hr r-mt20 r-mb20");
             var el2 = dom.createTextNode("\n      ");
             dom.appendChild(el1, el2);
             var el2 = dom.createElement("span");
-            var el3 = dom.createTextNode("INSTANCE");
+            var el3 = dom.createTextNode("Select Region");
             dom.appendChild(el2, el3);
             dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n    ");
-            dom.appendChild(el1, el2);
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n\n    ");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createElement("div");
-            dom.setAttribute(el1,"class","row form-group");
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-1");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("div");
-            dom.setAttribute(el3,"class","form-label");
-            var el4 = dom.createTextNode("\n          ");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createElement("label");
-            dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("Image*");
-            dom.appendChild(el4, el5);
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("\n        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("select");
-            dom.setAttribute(el3,"class","form-control");
-            var el4 = dom.createTextNode("\n");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createComment("");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode(" \n\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-1");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("div");
-            dom.setAttribute(el3,"class","form-label");
-            var el4 = dom.createTextNode("\n          ");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createElement("label");
-            dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("Flavor*");
-            dom.appendChild(el4, el5);
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("\n        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("select");
-            dom.setAttribute(el3,"class","form-control");
-            var el4 = dom.createTextNode("\n");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createComment("");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n    ");
+            var el2 = dom.createTextNode("\n     ");
             dom.appendChild(el1, el2);
             dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n    \n    ");
+            var el1 = dom.createTextNode("\n\n     ");
             dom.appendChild(el0, el1);
             var el1 = dom.createElement("div");
             dom.setAttribute(el1,"class","row form-group");
@@ -4282,7 +3951,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
             dom.appendChild(el3, el4);
             var el4 = dom.createElement("label");
             dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("Network*");
+            var el5 = dom.createTextNode("Region*");
             dom.appendChild(el4, el5);
             dom.appendChild(el3, el4);
             var el4 = dom.createTextNode("\n        ");
@@ -4294,7 +3963,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
             var el2 = dom.createTextNode("\n      ");
             dom.appendChild(el1, el2);
             var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
+            dom.setAttribute(el2,"class","col-md-11");
             var el3 = dom.createTextNode("\n        ");
             dom.appendChild(el2, el3);
             var el3 = dom.createElement("select");
@@ -4304,59 +3973,6 @@ exports["default"] = Ember.HTMLBars.template((function() {
             var el4 = dom.createComment("");
             dom.appendChild(el3, el4);
             var el4 = dom.createTextNode("        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("p");
-            dom.setAttribute(el3,"class","text-info");
-            var el4 = dom.createTextNode("Default: node-int-net-01.");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-1");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("div");
-            dom.setAttribute(el3,"class","form-label");
-            var el4 = dom.createTextNode("\n          ");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createElement("label");
-            dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("FIP Pool");
-            dom.appendChild(el4, el5);
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("\n        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("select");
-            dom.setAttribute(el3,"class","form-control");
-            var el4 = dom.createTextNode("\n");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createComment("");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("p");
-            dom.setAttribute(el3,"class","text-info");
-            var el4 = dom.createTextNode("Default: public-ext-net-01.");
             dom.appendChild(el3, el4);
             dom.appendChild(el2, el3);
             var el3 = dom.createTextNode("\n      ");
@@ -4366,182 +3982,761 @@ exports["default"] = Ember.HTMLBars.template((function() {
             dom.appendChild(el1, el2);
             dom.appendChild(el0, el1);
             var el1 = dom.createTextNode("\n\n    ");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createElement("div");
-            dom.setAttribute(el1,"class","row form-group");
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-1");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("div");
-            dom.setAttribute(el3,"class","form-label");
-            var el4 = dom.createTextNode("\n          ");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createElement("label");
-            dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("Sec Groups");
-            dom.appendChild(el4, el5);
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("\n        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
-            var el3 = dom.createTextNode("\n         ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("select");
-            dom.setAttribute(el3,"class","form-control");
-            var el4 = dom.createTextNode("\n");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createComment("");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("p");
-            dom.setAttribute(el3,"class","text-info");
-            var el4 = dom.createTextNode("Make sure that the port 2376 is open.");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-1");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createElement("div");
-            dom.setAttribute(el3,"class","form-label");
-            var el4 = dom.createTextNode("\n          ");
-            dom.appendChild(el3, el4);
-            var el4 = dom.createElement("label");
-            dom.setAttribute(el4,"class","form-control-static");
-            var el5 = dom.createTextNode("SSH user");
-            dom.appendChild(el4, el5);
-            dom.appendChild(el3, el4);
-            var el4 = dom.createTextNode("\n        ");
-            dom.appendChild(el3, el4);
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("div");
-            dom.setAttribute(el2,"class","col-md-5");
-            var el3 = dom.createTextNode("\n        ");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createComment("");
-            dom.appendChild(el2, el3);
-            var el3 = dom.createTextNode("\n      ");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n    ");
-            dom.appendChild(el1, el2);
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n\n");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("    ");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createComment("");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("    ");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createComment("");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n\n");
-            dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("    ");
             dom.appendChild(el0, el1);
             var el1 = dom.createElement("div");
             dom.setAttribute(el1,"class","footer-actions");
-            var el2 = dom.createTextNode("\n      ");
-            dom.appendChild(el1, el2);
-            var el2 = dom.createElement("button");
-            dom.setAttribute(el2,"name","submit");
-            dom.setAttribute(el2,"class","btn bg-transparent");
-            var el3 = dom.createTextNode("Back");
-            dom.appendChild(el2, el3);
-            dom.appendChild(el1, el2);
-            var el2 = dom.createTextNode("\n      ");
+            var el2 = dom.createTextNode("\n        ");
             dom.appendChild(el1, el2);
             var el2 = dom.createElement("button");
             dom.setAttribute(el2,"name","submit");
             dom.setAttribute(el2,"class","btn bg-primary");
-            var el3 = dom.createTextNode("Save");
+            var el3 = dom.createTextNode("Next: Select instance configuration");
             dom.appendChild(el2, el3);
             dom.appendChild(el1, el2);
             var el2 = dom.createTextNode("\n    ");
             dom.appendChild(el1, el2);
             dom.appendChild(el0, el1);
-            var el1 = dom.createTextNode("\n    ");
+            var el1 = dom.createTextNode("\n\n");
             dom.appendChild(el0, el1);
             return el0;
           },
           buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
-            var element5 = dom.childAt(fragment, [5]);
-            var element6 = dom.childAt(element5, [3, 1]);
-            var element7 = dom.childAt(element5, [7, 1]);
-            var element8 = dom.childAt(fragment, [7]);
-            var element9 = dom.childAt(element8, [3, 1]);
-            var element10 = dom.childAt(element8, [7, 1]);
-            var element11 = dom.childAt(fragment, [9]);
-            var element12 = dom.childAt(element11, [3, 1]);
-            var element13 = dom.childAt(fragment, [18]);
-            var element14 = dom.childAt(element13, [1]);
-            var element15 = dom.childAt(element13, [3]);
-            var morphs = new Array(16);
-            morphs[0] = dom.createMorphAt(fragment,1,1,contextualElement);
-            morphs[1] = dom.createAttrMorph(element6, 'onchange');
-            morphs[2] = dom.createMorphAt(element6,1,1);
-            morphs[3] = dom.createAttrMorph(element7, 'onchange');
-            morphs[4] = dom.createMorphAt(element7,1,1);
-            morphs[5] = dom.createAttrMorph(element9, 'onchange');
-            morphs[6] = dom.createMorphAt(element9,1,1);
-            morphs[7] = dom.createAttrMorph(element10, 'onchange');
-            morphs[8] = dom.createMorphAt(element10,1,1);
-            morphs[9] = dom.createAttrMorph(element12, 'onchange');
-            morphs[10] = dom.createMorphAt(element12,1,1);
-            morphs[11] = dom.createMorphAt(dom.childAt(element11, [7]),1,1);
-            morphs[12] = dom.createMorphAt(fragment,12,12,contextualElement);
-            morphs[13] = dom.createMorphAt(fragment,15,15,contextualElement);
-            morphs[14] = dom.createElementMorph(element14);
-            morphs[15] = dom.createElementMorph(element15);
+            var element20 = dom.childAt(fragment, [3, 3, 1]);
+            var element21 = dom.childAt(fragment, [5, 1]);
+            var morphs = new Array(3);
+            morphs[0] = dom.createAttrMorph(element20, 'onchange');
+            morphs[1] = dom.createMorphAt(element20,1,1);
+            morphs[2] = dom.createElementMorph(element21);
             return morphs;
           },
           statements: [
-            ["inline","partial",["host/add-common"],[],["loc",[null,[78,4],[78,33]]],0,0],
-            ["attribute","onchange",["subexpr","action",["selectImage"],["value","target.value"],["loc",[null,[null,null],[90,91]]],0,0],0,0,0,0],
-            ["block","each",[["get","fiwareImages",["loc",[null,[91,18],[91,30]]],0,0,0,0]],[],0,null,["loc",[null,[91,10],[93,19]]]],
-            ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.flavorName",["loc",[null,[103,60],[103,92]]],0,0,0,0]],[],["loc",[null,[103,55],[103,93]]],0,0]],["value","target.value"],["loc",[null,[null,null],[103,116]]],0,0],0,0,0,0],
-            ["block","each",[["get","fiwareFlavors",["loc",[null,[104,18],[104,31]]],0,0,0,0]],[],1,null,["loc",[null,[104,10],[106,19]]]],
-            ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.netName",["loc",[null,[118,60],[118,89]]],0,0,0,0]],[],["loc",[null,[118,55],[118,90]]],0,0]],["value","target.value"],["loc",[null,[null,null],[118,113]]],0,0],0,0,0,0],
-            ["block","each",[["get","fiwareNetworks",["loc",[null,[119,18],[119,32]]],0,0,0,0]],[],2,null,["loc",[null,[119,10],[121,19]]]],
-            ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.floatingipPool",["loc",[null,[131,60],[131,96]]],0,0,0,0]],[],["loc",[null,[131,55],[131,97]]],0,0]],["value","target.value"],["loc",[null,[null,null],[131,120]]],0,0],0,0,0,0],
-            ["block","each",[["get","fiwarefippool",["loc",[null,[132,18],[132,31]]],0,0,0,0]],[],3,null,["loc",[null,[132,10],[134,19]]]],
-            ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.secGroups",["loc",[null,[147,61],[147,92]]],0,0,0,0]],[],["loc",[null,[147,56],[147,93]]],0,0]],["value","target.value"],["loc",[null,[null,null],[147,116]]],0,0],0,0,0,0],
-            ["block","each",[["get","fiwareSecGroups",["loc",[null,[148,18],[148,33]]],0,0,0,0]],[],4,null,["loc",[null,[148,10],[150,19]]]],
-            ["inline","input",[],["type","text","name","sshUser","value",["subexpr","@mut",[["get","model.fiwarelabConfig.sshUser",["loc",[null,[162,49],[162,78]]],0,0,0,0]],[],[],0,0],"classNames","form-control","placeholder","root"],["loc",[null,[162,8],[162,125]]],0,0],
-            ["inline","partial",["host/add-options"],[],["loc",[null,[167,4],[167,34]]],0,0],
-            ["inline","top-errors",[],["errors",["subexpr","@mut",[["get","errors",["loc",[null,[169,24],[169,30]]],0,0,0,0]],[],[],0,0]],["loc",[null,[169,4],[169,32]]],0,0],
-            ["element","action",["back"],[],["loc",[null,[173,14],[173,31]]],0,0],
-            ["element","action",["save"],[],["loc",[null,[174,14],[174,31]]],0,0]
+            ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.region",["loc",[null,[71,60],[71,88]]],0,0,0,0]],[],["loc",[null,[71,55],[71,89]]],0,0]],["value","target.value"],["loc",[null,[null,null],[71,112]]],0,0],0,0,0,0],
+            ["block","each",[["get","regions",["loc",[null,[72,18],[72,25]]],0,0,0,0]],[],0,null,["loc",[null,[72,10],[74,19]]]],
+            ["element","action",["regionSelected"],[],["loc",[null,[80,16],[80,43]]],0,0]
           ],
           locals: [],
-          templates: [child0, child1, child2, child3, child4]
+          templates: [child0]
+        };
+      }());
+      var child1 = (function() {
+        var child0 = (function() {
+          var child0 = (function() {
+            return {
+              meta: {
+                "revision": "Ember@2.9.1",
+                "loc": {
+                  "source": null,
+                  "start": {
+                    "line": 97,
+                    "column": 10
+                  },
+                  "end": {
+                    "line": 99,
+                    "column": 10
+                  }
+                }
+              },
+              isEmpty: false,
+              arity: 1,
+              cachedFragment: null,
+              hasRendered: false,
+              buildFragment: function buildFragment(dom) {
+                var el0 = dom.createDocumentFragment();
+                var el1 = dom.createTextNode("            ");
+                dom.appendChild(el0, el1);
+                var el1 = dom.createElement("option");
+                var el2 = dom.createComment("");
+                dom.appendChild(el1, el2);
+                dom.appendChild(el0, el1);
+                var el1 = dom.createTextNode("\n");
+                dom.appendChild(el0, el1);
+                return el0;
+              },
+              buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+                var element5 = dom.childAt(fragment, [1]);
+                var morphs = new Array(3);
+                morphs[0] = dom.createAttrMorph(element5, 'value');
+                morphs[1] = dom.createAttrMorph(element5, 'selected');
+                morphs[2] = dom.createMorphAt(element5,0,0);
+                return morphs;
+              },
+              statements: [
+                ["attribute","value",["get","choice.slug",["loc",[null,[98,28],[98,39]]],0,0,0,0],0,0,0,0],
+                ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.imageName",["loc",[null,[98,56],[98,87]]],0,0,0,0],["get","choice.slug",["loc",[null,[98,88],[98,99]]],0,0,0,0]],[],["loc",[null,[null,null],[98,101]]],0,0],0,0,0,0],
+                ["content","choice.name",["loc",[null,[98,102],[98,117]]],0,0,0,0]
+              ],
+              locals: ["choice"],
+              templates: []
+            };
+          }());
+          var child1 = (function() {
+            return {
+              meta: {
+                "revision": "Ember@2.9.1",
+                "loc": {
+                  "source": null,
+                  "start": {
+                    "line": 110,
+                    "column": 10
+                  },
+                  "end": {
+                    "line": 112,
+                    "column": 10
+                  }
+                }
+              },
+              isEmpty: false,
+              arity: 1,
+              cachedFragment: null,
+              hasRendered: false,
+              buildFragment: function buildFragment(dom) {
+                var el0 = dom.createDocumentFragment();
+                var el1 = dom.createTextNode("            ");
+                dom.appendChild(el0, el1);
+                var el1 = dom.createElement("option");
+                var el2 = dom.createComment("");
+                dom.appendChild(el1, el2);
+                dom.appendChild(el0, el1);
+                var el1 = dom.createTextNode("\n");
+                dom.appendChild(el0, el1);
+                return el0;
+              },
+              buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+                var element4 = dom.childAt(fragment, [1]);
+                var morphs = new Array(3);
+                morphs[0] = dom.createAttrMorph(element4, 'value');
+                morphs[1] = dom.createAttrMorph(element4, 'selected');
+                morphs[2] = dom.createMorphAt(element4,0,0);
+                return morphs;
+              },
+              statements: [
+                ["attribute","value",["get","choice.name",["loc",[null,[111,28],[111,39]]],0,0,0,0],0,0,0,0],
+                ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.flavorName",["loc",[null,[111,56],[111,88]]],0,0,0,0],["get","choice.name",["loc",[null,[111,89],[111,100]]],0,0,0,0]],[],["loc",[null,[null,null],[111,102]]],0,0],0,0,0,0],
+                ["content","choice.name",["loc",[null,[111,103],[111,118]]],0,0,0,0]
+              ],
+              locals: ["choice"],
+              templates: []
+            };
+          }());
+          var child2 = (function() {
+            return {
+              meta: {
+                "revision": "Ember@2.9.1",
+                "loc": {
+                  "source": null,
+                  "start": {
+                    "line": 125,
+                    "column": 10
+                  },
+                  "end": {
+                    "line": 127,
+                    "column": 10
+                  }
+                }
+              },
+              isEmpty: false,
+              arity: 1,
+              cachedFragment: null,
+              hasRendered: false,
+              buildFragment: function buildFragment(dom) {
+                var el0 = dom.createDocumentFragment();
+                var el1 = dom.createTextNode("            ");
+                dom.appendChild(el0, el1);
+                var el1 = dom.createElement("option");
+                var el2 = dom.createComment("");
+                dom.appendChild(el1, el2);
+                dom.appendChild(el0, el1);
+                var el1 = dom.createTextNode("\n");
+                dom.appendChild(el0, el1);
+                return el0;
+              },
+              buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+                var element3 = dom.childAt(fragment, [1]);
+                var morphs = new Array(3);
+                morphs[0] = dom.createAttrMorph(element3, 'value');
+                morphs[1] = dom.createAttrMorph(element3, 'selected');
+                morphs[2] = dom.createMorphAt(element3,0,0);
+                return morphs;
+              },
+              statements: [
+                ["attribute","value",["get","choice.name",["loc",[null,[126,28],[126,39]]],0,0,0,0],0,0,0,0],
+                ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.netName",["loc",[null,[126,56],[126,85]]],0,0,0,0],["get","choice.name",["loc",[null,[126,86],[126,97]]],0,0,0,0]],[],["loc",[null,[null,null],[126,99]]],0,0],0,0,0,0],
+                ["content","choice.name",["loc",[null,[126,100],[126,115]]],0,0,0,0]
+              ],
+              locals: ["choice"],
+              templates: []
+            };
+          }());
+          var child3 = (function() {
+            return {
+              meta: {
+                "revision": "Ember@2.9.1",
+                "loc": {
+                  "source": null,
+                  "start": {
+                    "line": 138,
+                    "column": 10
+                  },
+                  "end": {
+                    "line": 140,
+                    "column": 10
+                  }
+                }
+              },
+              isEmpty: false,
+              arity: 1,
+              cachedFragment: null,
+              hasRendered: false,
+              buildFragment: function buildFragment(dom) {
+                var el0 = dom.createDocumentFragment();
+                var el1 = dom.createTextNode("            ");
+                dom.appendChild(el0, el1);
+                var el1 = dom.createElement("option");
+                var el2 = dom.createComment("");
+                dom.appendChild(el1, el2);
+                dom.appendChild(el0, el1);
+                var el1 = dom.createTextNode("\n");
+                dom.appendChild(el0, el1);
+                return el0;
+              },
+              buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+                var element2 = dom.childAt(fragment, [1]);
+                var morphs = new Array(3);
+                morphs[0] = dom.createAttrMorph(element2, 'value');
+                morphs[1] = dom.createAttrMorph(element2, 'selected');
+                morphs[2] = dom.createMorphAt(element2,0,0);
+                return morphs;
+              },
+              statements: [
+                ["attribute","value",["get","choice.name",["loc",[null,[139,28],[139,39]]],0,0,0,0],0,0,0,0],
+                ["attribute","selected",["subexpr","eq",[["get","model.fiwarelabConfig.floatingipPool",["loc",[null,[139,56],[139,92]]],0,0,0,0],["get","choice.name",["loc",[null,[139,93],[139,104]]],0,0,0,0]],[],["loc",[null,[null,null],[139,106]]],0,0],0,0,0,0],
+                ["content","choice.name",["loc",[null,[139,107],[139,122]]],0,0,0,0]
+              ],
+              locals: ["choice"],
+              templates: []
+            };
+          }());
+          var child4 = (function() {
+            return {
+              meta: {
+                "revision": "Ember@2.9.1",
+                "loc": {
+                  "source": null,
+                  "start": {
+                    "line": 157,
+                    "column": 12
+                  },
+                  "end": {
+                    "line": 159,
+                    "column": 12
+                  }
+                }
+              },
+              isEmpty: false,
+              arity: 1,
+              cachedFragment: null,
+              hasRendered: false,
+              buildFragment: function buildFragment(dom) {
+                var el0 = dom.createDocumentFragment();
+                var el1 = dom.createTextNode("              ");
+                dom.appendChild(el0, el1);
+                var el1 = dom.createElement("li");
+                var el2 = dom.createElement("input");
+                dom.setAttribute(el2,"type","checkbox");
+                dom.appendChild(el1, el2);
+                var el2 = dom.createTextNode(" ");
+                dom.appendChild(el1, el2);
+                var el2 = dom.createComment("");
+                dom.appendChild(el1, el2);
+                dom.appendChild(el0, el1);
+                var el1 = dom.createTextNode("\n");
+                dom.appendChild(el0, el1);
+                return el0;
+              },
+              buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+                var element0 = dom.childAt(fragment, [1]);
+                var element1 = dom.childAt(element0, [0]);
+                var morphs = new Array(4);
+                morphs[0] = dom.createAttrMorph(element1, 'name');
+                morphs[1] = dom.createAttrMorph(element1, 'value');
+                morphs[2] = dom.createAttrMorph(element1, 'onchange');
+                morphs[3] = dom.createMorphAt(element0,2,2);
+                return morphs;
+              },
+              statements: [
+                ["attribute","name",["get","choice.name",["loc",[null,[158,48],[158,59]]],0,0,0,0],0,0,0,0],
+                ["attribute","value",["get","choice.name",["loc",[null,[158,70],[158,81]]],0,0,0,0],0,0,0,0],
+                ["attribute","onchange",["subexpr","action",[["subexpr","action",["secGroupList",["get","choice.name",["loc",[null,[158,125],[158,136]]],0,0,0,0]],[],["loc",[null,[158,102],[158,137]]],0,0]],["value","target.checked"],["loc",[null,[null,null],[158,162]]],0,0],0,0,0,0],
+                ["content","choice.name",["loc",[null,[158,164],[158,179]]],0,0,0,0]
+              ],
+              locals: ["choice"],
+              templates: []
+            };
+          }());
+          return {
+            meta: {
+              "revision": "Ember@2.9.1",
+              "loc": {
+                "source": null,
+                "start": {
+                  "line": 83,
+                  "column": 4
+                },
+                "end": {
+                  "line": 185,
+                  "column": 4
+                }
+              }
+            },
+            isEmpty: false,
+            arity: 0,
+            cachedFragment: null,
+            hasRendered: false,
+            buildFragment: function buildFragment(dom) {
+              var el0 = dom.createDocumentFragment();
+              var el1 = dom.createTextNode("    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createComment("");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createElement("div");
+              dom.setAttribute(el1,"class","over-hr r-mt20 r-mb20");
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("span");
+              var el3 = dom.createTextNode("INSTANCE");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n    ");
+              dom.appendChild(el1, el2);
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n\n    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createElement("div");
+              dom.setAttribute(el1,"class","row form-group");
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("Image*");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("select");
+              dom.setAttribute(el3,"class","form-control");
+              var el4 = dom.createTextNode("\n");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createComment("");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode(" \n\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("Flavor*");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("select");
+              dom.setAttribute(el3,"class","form-control");
+              var el4 = dom.createTextNode("\n");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createComment("");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n    ");
+              dom.appendChild(el1, el2);
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n    \n    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createElement("div");
+              dom.setAttribute(el1,"class","row form-group");
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("Network*");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("select");
+              dom.setAttribute(el3,"class","form-control");
+              var el4 = dom.createTextNode("\n");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createComment("");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("p");
+              dom.setAttribute(el3,"class","text-info");
+              var el4 = dom.createTextNode("Default: node-int-net-01.");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("FIP Pool");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("select");
+              dom.setAttribute(el3,"class","form-control");
+              var el4 = dom.createTextNode("\n");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createComment("");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("p");
+              dom.setAttribute(el3,"class","text-info");
+              var el4 = dom.createTextNode("Default: public-ext-net-01.");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n    ");
+              dom.appendChild(el1, el2);
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n\n    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createElement("div");
+              dom.setAttribute(el1,"class","row form-group");
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("Sec Groups");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","dropdown");
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("button");
+              dom.setAttribute(el4,"name","submit");
+              dom.setAttribute(el4,"class","form-control button-dropdown text-left");
+              var el5 = dom.createComment("");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("div");
+              var el5 = dom.createTextNode("\n          ");
+              dom.appendChild(el4, el5);
+              var el5 = dom.createElement("ul");
+              var el6 = dom.createTextNode("\n");
+              dom.appendChild(el5, el6);
+              var el6 = dom.createComment("");
+              dom.appendChild(el5, el6);
+              var el6 = dom.createTextNode("          ");
+              dom.appendChild(el5, el6);
+              dom.appendChild(el4, el5);
+              var el5 = dom.createTextNode("\n        ");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n      ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("p");
+              dom.setAttribute(el3,"class","text-info");
+              var el4 = dom.createTextNode("Make sure that the port 2376 is open.");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-1");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createElement("div");
+              dom.setAttribute(el3,"class","form-label");
+              var el4 = dom.createTextNode("\n          ");
+              dom.appendChild(el3, el4);
+              var el4 = dom.createElement("label");
+              dom.setAttribute(el4,"class","form-control-static");
+              var el5 = dom.createTextNode("SSH user");
+              dom.appendChild(el4, el5);
+              dom.appendChild(el3, el4);
+              var el4 = dom.createTextNode("\n        ");
+              dom.appendChild(el3, el4);
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("div");
+              dom.setAttribute(el2,"class","col-md-5");
+              var el3 = dom.createTextNode("\n        ");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createComment("");
+              dom.appendChild(el2, el3);
+              var el3 = dom.createTextNode("\n      ");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n    ");
+              dom.appendChild(el1, el2);
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n\n");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createComment("");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createComment("");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n\n");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("    ");
+              dom.appendChild(el0, el1);
+              var el1 = dom.createElement("div");
+              dom.setAttribute(el1,"class","footer-actions");
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("button");
+              dom.setAttribute(el2,"name","submit");
+              dom.setAttribute(el2,"class","btn bg-transparent");
+              var el3 = dom.createTextNode("Back");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n      ");
+              dom.appendChild(el1, el2);
+              var el2 = dom.createElement("button");
+              dom.setAttribute(el2,"name","submit");
+              dom.setAttribute(el2,"class","btn bg-primary");
+              var el3 = dom.createTextNode("Save");
+              dom.appendChild(el2, el3);
+              dom.appendChild(el1, el2);
+              var el2 = dom.createTextNode("\n    ");
+              dom.appendChild(el1, el2);
+              dom.appendChild(el0, el1);
+              var el1 = dom.createTextNode("\n    ");
+              dom.appendChild(el0, el1);
+              return el0;
+            },
+            buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+              var element6 = dom.childAt(fragment, [5]);
+              var element7 = dom.childAt(element6, [3, 1]);
+              var element8 = dom.childAt(element6, [7, 1]);
+              var element9 = dom.childAt(fragment, [7]);
+              var element10 = dom.childAt(element9, [3, 1]);
+              var element11 = dom.childAt(element9, [7, 1]);
+              var element12 = dom.childAt(fragment, [9]);
+              var element13 = dom.childAt(element12, [3, 1]);
+              var element14 = dom.childAt(element13, [1]);
+              var element15 = dom.childAt(element13, [3]);
+              var element16 = dom.childAt(fragment, [18]);
+              var element17 = dom.childAt(element16, [1]);
+              var element18 = dom.childAt(element16, [3]);
+              var morphs = new Array(18);
+              morphs[0] = dom.createMorphAt(fragment,1,1,contextualElement);
+              morphs[1] = dom.createAttrMorph(element7, 'onchange');
+              morphs[2] = dom.createMorphAt(element7,1,1);
+              morphs[3] = dom.createAttrMorph(element8, 'onchange');
+              morphs[4] = dom.createMorphAt(element8,1,1);
+              morphs[5] = dom.createAttrMorph(element10, 'onchange');
+              morphs[6] = dom.createMorphAt(element10,1,1);
+              morphs[7] = dom.createAttrMorph(element11, 'onchange');
+              morphs[8] = dom.createMorphAt(element11,1,1);
+              morphs[9] = dom.createElementMorph(element14);
+              morphs[10] = dom.createMorphAt(element14,0,0);
+              morphs[11] = dom.createAttrMorph(element15, 'class');
+              morphs[12] = dom.createMorphAt(dom.childAt(element15, [1]),1,1);
+              morphs[13] = dom.createMorphAt(dom.childAt(element12, [7]),1,1);
+              morphs[14] = dom.createMorphAt(fragment,12,12,contextualElement);
+              morphs[15] = dom.createMorphAt(fragment,15,15,contextualElement);
+              morphs[16] = dom.createElementMorph(element17);
+              morphs[17] = dom.createElementMorph(element18);
+              return morphs;
+            },
+            statements: [
+              ["inline","partial",["host/add-common"],[],["loc",[null,[84,4],[84,33]]],0,0],
+              ["attribute","onchange",["subexpr","action",["selectImage"],["value","target.value"],["loc",[null,[null,null],[96,91]]],0,0],0,0,0,0],
+              ["block","each",[["get","fiwareImages",["loc",[null,[97,18],[97,30]]],0,0,0,0]],[],0,null,["loc",[null,[97,10],[99,19]]]],
+              ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.flavorName",["loc",[null,[109,60],[109,92]]],0,0,0,0]],[],["loc",[null,[109,55],[109,93]]],0,0]],["value","target.value"],["loc",[null,[null,null],[109,116]]],0,0],0,0,0,0],
+              ["block","each",[["get","fiwareFlavors",["loc",[null,[110,18],[110,31]]],0,0,0,0]],[],1,null,["loc",[null,[110,10],[112,19]]]],
+              ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.netName",["loc",[null,[124,60],[124,89]]],0,0,0,0]],[],["loc",[null,[124,55],[124,90]]],0,0]],["value","target.value"],["loc",[null,[null,null],[124,113]]],0,0],0,0,0,0],
+              ["block","each",[["get","fiwareNetworks",["loc",[null,[125,18],[125,32]]],0,0,0,0]],[],2,null,["loc",[null,[125,10],[127,19]]]],
+              ["attribute","onchange",["subexpr","action",[["subexpr","mut",[["get","model.fiwarelabConfig.floatingipPool",["loc",[null,[137,60],[137,96]]],0,0,0,0]],[],["loc",[null,[137,55],[137,97]]],0,0]],["value","target.value"],["loc",[null,[null,null],[137,120]]],0,0],0,0,0,0],
+              ["block","each",[["get","fiwarefippool",["loc",[null,[138,18],[138,31]]],0,0,0,0]],[],3,null,["loc",[null,[138,10],[140,19]]]],
+              ["element","action",["toggleVisible"],[],["loc",[null,[154,16],[154,42]]],0,0],
+              ["content","model.fiwarelabConfig.secGroups",["loc",[null,[154,104],[154,139]]],0,0,0,0],
+              ["attribute","class",["get","toggleSec",["loc",[null,[155,21],[155,30]]],0,0,0,0],0,0,0,0],
+              ["block","each",[["get","fiwareSecGroups",["loc",[null,[157,20],[157,35]]],0,0,0,0]],[],4,null,["loc",[null,[157,12],[159,21]]]],
+              ["inline","input",[],["type","text","name","sshUser","value",["subexpr","@mut",[["get","model.fiwarelabConfig.sshUser",["loc",[null,[171,49],[171,78]]],0,0,0,0]],[],[],0,0],"classNames","form-control","placeholder","root"],["loc",[null,[171,8],[171,125]]],0,0],
+              ["inline","partial",["host/add-options"],[],["loc",[null,[176,4],[176,34]]],0,0],
+              ["inline","top-errors",[],["errors",["subexpr","@mut",[["get","errors",["loc",[null,[178,24],[178,30]]],0,0,0,0]],[],[],0,0]],["loc",[null,[178,4],[178,32]]],0,0],
+              ["element","action",["back"],[],["loc",[null,[182,14],[182,31]]],0,0],
+              ["element","action",["save"],[],["loc",[null,[183,14],[183,31]]],0,0]
+            ],
+            locals: [],
+            templates: [child0, child1, child2, child3, child4]
+          };
+        }());
+        return {
+          meta: {
+            "revision": "Ember@2.9.1",
+            "loc": {
+              "source": null,
+              "start": {
+                "line": 83,
+                "column": 4
+              },
+              "end": {
+                "line": 185,
+                "column": 4
+              }
+            }
+          },
+          isEmpty: false,
+          arity: 0,
+          cachedFragment: null,
+          hasRendered: false,
+          buildFragment: function buildFragment(dom) {
+            var el0 = dom.createDocumentFragment();
+            var el1 = dom.createComment("");
+            dom.appendChild(el0, el1);
+            return el0;
+          },
+          buildRenderNodes: function buildRenderNodes(dom, fragment, contextualElement) {
+            var morphs = new Array(1);
+            morphs[0] = dom.createMorphAt(fragment,0,0,contextualElement);
+            dom.insertBoundary(fragment, 0);
+            dom.insertBoundary(fragment, null);
+            return morphs;
+          },
+          statements: [
+            ["block","if",[["get","isStep4",["loc",[null,[83,14],[83,21]]],0,0,0,0]],[],0,null,["loc",[null,[83,4],[185,4]]]]
+          ],
+          locals: [],
+          templates: [child0]
         };
       }());
       return {
@@ -4550,11 +4745,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
           "loc": {
             "source": null,
             "start": {
-              "line": 77,
+              "line": 58,
               "column": 4
             },
             "end": {
-              "line": 176,
+              "line": 185,
               "column": 4
             }
           }
@@ -4577,10 +4772,10 @@ exports["default"] = Ember.HTMLBars.template((function() {
           return morphs;
         },
         statements: [
-          ["block","if",[["get","isStep3",["loc",[null,[77,14],[77,21]]],0,0,0,0]],[],0,null,["loc",[null,[77,4],[176,4]]]]
+          ["block","if",[["get","isStep3",["loc",[null,[58,14],[58,21]]],0,0,0,0]],[],0,1,["loc",[null,[58,4],[185,4]]]]
         ],
         locals: [],
-        templates: [child0]
+        templates: [child0, child1]
       };
     }());
     return {
@@ -4589,11 +4784,11 @@ exports["default"] = Ember.HTMLBars.template((function() {
         "loc": {
           "source": null,
           "start": {
-            "line": 52,
+            "line": 33,
             "column": 4
           },
           "end": {
-            "line": 176,
+            "line": 185,
             "column": 4
           }
         }
@@ -4616,7 +4811,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
         return morphs;
       },
       statements: [
-        ["block","if",[["get","isStep2",["loc",[null,[52,14],[52,21]]],0,0,0,0]],[],0,1,["loc",[null,[52,4],[176,4]]]]
+        ["block","if",[["get","isStep2",["loc",[null,[33,14],[33,21]]],0,0,0,0]],[],0,1,["loc",[null,[33,4],[185,4]]]]
       ],
       locals: [],
       templates: [child0, child1]
@@ -4632,7 +4827,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
           "column": 0
         },
         "end": {
-          "line": 180,
+          "line": 189,
           "column": 0
         }
       }
@@ -4675,7 +4870,7 @@ exports["default"] = Ember.HTMLBars.template((function() {
       return morphs;
     },
     statements: [
-      ["block","if",[["get","isStep1",["loc",[null,[4,10],[4,17]]],0,0,0,0]],[],0,1,["loc",[null,[4,4],[176,11]]]]
+      ["block","if",[["get","isStep1",["loc",[null,[4,10],[4,17]]],0,0,0,0]],[],0,1,["loc",[null,[4,4],[185,11]]]]
     ],
     locals: [],
     templates: [child0, child1]

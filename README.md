@@ -5,7 +5,7 @@ FIWARELab Rancher UI driver
 
 * Add a Machine Driver in Rancher (Admin tab -> Settings -> Machine Drivers)
   * Download URL: https://github.com/icclab/ui-driver-fiwarelab/releases/download/v0.0.3/docker-machine-driver-fiwarelab-linux-amd64.tar.gz
-  * Custom UI URL: https://github.com/icclab/ui-driver-fiwarelab/releases/download/v0.0.3/component.js
+  * Custom UI URL: https://icclab.github.io/ui-driver-fiwarelab/dist/component.js
 * Wait for the driver to become "Active"
 * Go to Infrastructure -> Hosts -> Add Host, your driver and custom UI should show up.
 

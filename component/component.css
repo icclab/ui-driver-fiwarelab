@@ -1,3 +1,33 @@
 .machine-driver.%%DRIVERNAME%% {
   background-image: url('FIWARE_lab.png');
 }
+
+.dropdown {
+    position: relative;
+}
+
+.button-dropdown {
+	cursor: default;
+}
+
+.button-dropdown:after{
+	content: '▾';
+	padding: 12px 8px;
+    position: absolute; right: 10px; top: 0;
+}
+
+.dropdown-content {
+    display: none;
+}
+
+ul {
+    list-style: outside none none;
+}
+
+.dropdown-content-visible {
+    display: block;
+    background-color: #ffffff;
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+}
