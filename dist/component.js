@@ -202,8 +202,8 @@ JSTACK.Comm = (function (JS, undefined) {
         var endpoint;
         if (JSTACK.Keystone.params.version === 3) {
             type = type.split('URL')[0];
-            for (var e in serv.endpoints) {
-                if (serv.endpoints[e].region === region && serv.endpoints[e].interface === type) {
+            for (e=0; e < serv.endpoints.length; e++) {
+                if ((serv.endpoints[e].region === region || serv.endpoints[e].region_id === region) && serv.endpoints[e].interface === type) {
                     endpoint = serv.endpoints[e].url;
                     break;
                 }
